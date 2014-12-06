@@ -5,9 +5,9 @@
 ####################################################################
 
 # Directory where result data are located
-experiment_dir = '/Users/Tehojympytin/Documents/DTIsample/pipelinedata'
+experiment_dir = ''
 # Protocol that is applied in DTIprep
-DTIprep_protocol = '/Users/Tehojympytin/Documents/DTIsample/pipelinedata/default_all.xml'
+DTIprep_protocol = ''
 
 #
 # Moves file to results folder, overwriting the existing file
@@ -249,7 +249,7 @@ def FSL_dtifit(imgfile, maskfile, bvals, bvecs, output_prefix):
     return FA_out, MD_out
 
 #
-# Masking with FSL's ApplyMask
+# Masking with FSL's AppllyMask
 #
 # filename   - file that is masked (.nii.gz)
 # maskfile   - mask file (.nii.gz)
@@ -310,36 +310,58 @@ def FSL_FLIRT_write(input_file, reference_file, matrix_file, output_prefix):
 # Main script #
 ###############
 from argparse import ArgumentParser
+import glob
+import sys
+import os
+import conversions as conv
 if __name__ == "__main__":
     # Parse input arguments into args structure
     parser = ArgumentParser()
-    parser.add_argument("--dicomdir", dest="dicomdir", help="dicomdir", required=True)
-    parser.add_argument("--subject", dest="subject", help="subject id", required=True)
+    parser.add_argument("--T1", dest="T1", help="T1 subdirectory under subject", required=False)
+    parser.add_argument("--DTI", dest="DTI", help="DTI subdirectory under subject", required=False)
     args = parser.parse_args()
+    if not args.T1:
+        args.T1 = 'MR_T1W'
+        print "Using default T1 subfolder:"+args.T1
+    if not args.DTI:
+        args.DTI = 'MR_DTI_32'
+        print "Using default DTI subfolder:"+args.DTI
 
-    # Convert DICOM->NRRd
-    #out_file = dicom2nrrd(args.dicomdir, args.subject)
-    # DTIprep QC-tool
-    #qcfile, _, _ = dtiprep(out_file, args.subject)
-    # Convert NRRD->NII
-    #dwifile, bval_file, bvec_file = nrrd2nii(qcfile, args.subject)
-    dwifile = experiment_dir+'/'+args.subject+'/'+args.subject+'_QCed.nii.gz'
-    bval_file = experiment_dir+'/'+args.subject+'/'+args.subject+'_QCed.bval'
-    bvec_file = experiment_dir+'/'+args.subject+'/'+args.subject+'_QCed.bvec'
-    mask_file = runbet(dwifile, args.subject)
+    # Directory where result data are located
+    experiment_dir = '..' + os.sep + 'pipelinedata'
+    # Protocol that is applied in DTIprep
+    DTIprep_protocol = './default_all.xml'
 
-#    T1_file = experiment_dir+'/'+args.subject+'/'+args.subject+'T1_1.nii.gz'
-#    T1_file_mask = runbet(T1_file, args.subject)
-#    T1_at_FA_file, T1_to_FA_matrix = FSL_FLIRT_estim(T1_file, dwifile, args.subject)
-#    T1_mask_file = FSL_FLIRT_write(T1_file_mask, dwifile, T1_to_FA_matrix, args.subject)
+    datadir = '..' + os.sep + 'data'
+    subject_dirs = glob.glob(datadir + os.sep + '*')
+    for subject_dir in subject_dirs:
+        splitted = subject_dir.split(os.sep)
+        subject = splitted[-1]
+        DTIdir = subject_dir + os.sep + args.DTI
+        T1dir = subject_dir + os.sep + args.T1
+        print subject
+        print DTIdir
+        print T1dir
 
-    # Analyze tensors with FSL's dtifit
-    FAfile, MDfile = FSL_dtifit(dwifile, mask_file, bval_file, bvec_file, args.subject)
-    gunzip_to(FAfile, args.subject, experiment_dir)
-    gunzip_to(MDfile, args.subject, experiment_dir)
+        # Convert DICOM->NRRD
+        out_file = dicom2nrrd(DTIdir, subject)
+        # DTIprep QC-tool
+        qcfile, _, _ = dtiprep(out_file, subject)
+        # Convert NRRD->NII
+        dwifile, bval_file, bvec_file = nrrd2nii(qcfile, subject)
+        dwifile = experiment_dir + os.sep + subject + os.sep + subject + '_QCed.nii.gz'
+        bval_file = experiment_dir + os.sep + subject + os.sep + subject + '_QCed.bval'
+        bvec_file = experiment_dir + os.sep + subject + os.sep + subject + '_QCed.bvec'
+        mask_file = runbet(dwifile, subject)
 
-    # This commented line is for running FA map calculation and tracktography with DIPY
-    # corr_bvec = experiment_dir+'/'+args.subject+'/'+args.subject+'_QCed_forfsl.bvec'
-    # corr_bvec = correctbvec4fsl(dwifile, bvec_file, args.subject)
-    # DIPY_nii2streamlines(dwifile, T1_mask_file, bval_file, corr_bvec, args.subject)
+        T1_file, outfile_bval, outfile_bvec = conv.dicom2nii(T1dir, subject, 'T1', experiment_dir)
+        print T1_file
+        T1_file_mask = runbet(T1_file, subject)
+        T1_at_FA_file, T1_to_FA_matrix = FSL_FLIRT_estim(T1_file, dwifile, subject)
+        T1_mask_file = FSL_FLIRT_write(T1_file_mask, dwifile, T1_to_FA_matrix, subject)
+
+        # Analyze tensors with FSL's dtifit
+        FAfile, MDfile = FSL_dtifit(dwifile, mask_file, bval_file, bvec_file, subject)
+        gunzip_to(FAfile, subject, experiment_dir)
+        gunzip_to(MDfile, subject, experiment_dir)
 

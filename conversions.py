@@ -1,16 +1,122 @@
 #!/usr/bin/env python
 
-import dicom2streamlines as d2s
-experiment_dir = d2s.experiment_dir
+#
+# Moves file to results folder, overwriting the existing file
+#
+# filename       - file to be moved
+# out_prefix     - subject specific prefix
+# experiment_dir - base dir for pipeline data
+#
+def move_to_results(filename, out_prefix, experiment_dir):
+    import os
+    import shutil
+    outfile = experiment_dir + os.sep + out_prefix + os.sep + os.path.basename(filename)
+    if os.path.isfile(outfile):
+        os.remove(outfile)
+    shutil.move(filename,outfile)
+    return outfile
+
+#
+# Split filename into (<root>/<basename>.<extension>)
+#
+# filename - filename that is splitted
+#
+def split_ext(filename):
+    import os
+    # split path and filename
+    root, basename = os.path.split(filename)
+    # split extensions until none is found, catenating extensions
+    basename, ext_new = os.path.splitext(basename)
+    ext = ext_new
+    while len(ext_new) > 0:
+        basename, ext_new = os.path.splitext(basename)
+        ext = ext_new + ext
+    return root, basename, ext
+
+#
+# Renames file basename in its location
+#
+# filename     - filename that is renamed
+# basename_new - new basename
+#
+def rename_basename_to(filename, basename_new):
+    import os
+    import shutil
+    root, basename, ext = split_ext(filename)
+    filename_new = os.path.join(root, (basename_new + ext))
+    if os.path.isfile(filename_new):
+        os.remove(filename_new)
+    print filename
+    print filename_new
+    shutil.move(filename,filename_new)
+    return filename_new
+
+#
+# Replaces pattern in file in its location
+#
+# filename - filename that is modified in-place
+# pattern  - pattern that is replaced by subst
+# subst    - substitution to pattern
+#
+def replace_inplace(filename, pattern, subst):
+    from tempfile import mkstemp
+    from shutil import move
+    from os import remove, close
+    #Create temp file
+    fh, abs_path = mkstemp()
+    new_file = open(abs_path,'w')
+    old_file = open(filename)
+    for line in old_file:
+        new_file.write(line.replace(pattern, subst))
+    #close temp file
+    new_file.close()
+    close(fh)
+    old_file.close()
+    #Remove original file
+    remove(filename)
+    #Move new file
+    move(abs_path, filename)
+
+#
+# Convert DICOM to ITK's mhd
+#
+# dicomdir   - input DICOM directory
+# out_prefix - subject specific prefix
+#
+def dicom2mhd(dicomdir, out_prefix):
+    from nipype.utils.filemanip import split_filename
+    from nipype.interfaces.base import CommandLine
+    import os
+    _, name, _ = split_filename(dicomdir)
+    outfile_mhd = experiment_dir + os.sep + out_prefix + os.sep + name + '_tmp' + os.sep + 'output' + '.mhd'
+    outfile_raw = experiment_dir + os.sep + out_prefix + os.sep + name + '_tmp' + os.sep + 'output' + '.raw'
+    outfile_txt = experiment_dir + os.sep + out_prefix + os.sep + name + '_tmp' + os.sep + 'output' + '_info.txt'
+    outdir = experiment_dir + os.sep + out_prefix + os.sep + name + '_tmp'
+    cmd = CommandLine('./mcverter %s -f meta -o %s -F-PatientName-SeriesDate-SeriesDescription-StudyId-SeriesNumber' % (dicomdir,outdir))
+    print "DICOM->NII:" + cmd.cmd
+    cmd.run()
+    # Move to results folder
+    outfile_mhd = move_to_results(outfile_mhd, out_prefix)
+    outfile_raw = move_to_results(outfile_raw, out_prefix)
+    outfile_txt = move_to_results(outfile_txt, out_prefix)
+    os.rmdir(outdir)
+    # Rename basename, and reference in mhd header
+    outfile_mhd = rename_basename_to(outfile_mhd, name)
+    outfile_raw = rename_basename_to(outfile_raw, name)
+    outfile_txt = rename_basename_to(outfile_txt, name)
+    replace_inplace(outfile_mhd, ('output.raw'), (name + '.raw'))
+
+    return outfile_mhd, outfile_raw, outfile_txt
 
 #
 # Convert DICOM to Nifti
 #
-# dicomdir   - input DICOM directory
-# out_prefix - subject specific prefix
-# out_suffix - output file suffix
+# dicomdir       - input DICOM directory
+# out_prefix     - subject specific prefix
+# out_suffix     - output file suffix
+# experiment_dir - base dir for pipeline data
 #
-def dicom2nii(dicomdir, out_prefix, out_suffix):
+def dicom2nii(dicomdir, out_prefix, out_suffix, experiment_dir):
     import os
     import shutil
 
@@ -25,8 +131,8 @@ def dicom2nii(dicomdir, out_prefix, out_suffix):
             os.remove(os.path.join(dicomdir, dirnames[d_i]))
 
     from nipype.interfaces.base import CommandLine
-    basename = experiment_dir + '/' + out_prefix + '/' + out_prefix + out_suffix
-    cmd = CommandLine('/Users/eija/Documents/osx/dcm2nii -a Y -d N -e N -i N -p N -o %s %s' % (basename,dicomdir))
+    basename = experiment_dir + os.sep + out_prefix + os.sep + out_prefix + out_suffix
+    cmd = CommandLine('./dcm2nii -a Y -d N -e N -i N -p N -o %s %s' % (basename,dicomdir))
     print "DICOM->NII:" + cmd.cmd
     cmd.run()
 
@@ -49,28 +155,15 @@ def dicom2nii(dicomdir, out_prefix, out_suffix):
                 raise "multiple copies of .bvec was found"
             filename_bvec = fileName
 
-    outfile = d2s.move_to_results((dicomdir + '/' + filename_nii + '.gz'), out_prefix)
+    outfile = move_to_results((dicomdir + os.sep + filename_nii + '.gz'), out_prefix, experiment_dir)
     outfile_bval = ''
     outfile_bvec = ''
     if len(filename_bval) > 0:
-        outfile_bval = d2s.move_to_results((dicomdir + '/' + filename_bval + '.bval'), out_prefix)
+        outfile_bval = move_to_results((dicomdir + os.sep + filename_bval + '.bval'), out_prefix, experiment_dir)
     if len(filename_bvec) > 0:
-        outfile_bvec = d2s.move_to_results((dicomdir + '/' + filename_bvec + '.bvec'), out_prefix)
+        outfile_bvec = move_to_results((dicomdir + os.sep + filename_bvec + '.bvec'), out_prefix, experiment_dir)
 
     return outfile, outfile_bval, outfile_bvec
-
-#
-# 
-#
-def nii2analyze(in_file):
-    import os
-    import shutil
-    import nibabel as nib
-
-    fileName, fileExtension = os.path.splitext(in_file)
-    img = nib.load(in_file)
-    nib.analyze.save(img, fileName)
-    return (fileName + '.hdr'), (fileName + '.img')
 
 #
 # Gunzip (.nii.gz to .nii conversion)
@@ -80,12 +173,12 @@ def nii2analyze(in_file):
 def gznii2nii(in_file):
     import os
     import shutil
-    from nipype.interfaces.base import CommandLine
+
     fileName, fileExtension = os.path.splitext(in_file)
-    cmd = CommandLine('gunzip -f -k %s.gz' % (fileName))
+    cmd = CommandLine('gunzip -f -k %s.nii.gz' % (fileName))
     print "gunzip NII.GZ:" + cmd.cmd
     cmd.run()
-    return os.path.abspath('%s' % (fileName))
+    return os.path.abspath('%s.nii' % (fileName))
 
 #
 # Convert nii 2 nrrd
@@ -101,8 +194,8 @@ def nii2nrrd(filename_nii, filename_bval, filename_bvec, out_prefix, out_suffix)
     import shutil
 
     from nipype.interfaces.base import CommandLine
-    basename = experiment_dir + '/' + out_prefix + '/' + out_prefix + out_suffix
-    cmd = CommandLine('DWIConvert --inputVolume %s --outputVolume %s.nrrd --conversionMode FSLToNrrd --inputBValues %s --inputBVectors %s' % (filename_nii, basename, filename_bval, filename_bvec))
+    basename = experiment_dir + os.sep + out_prefix + os.sep + out_prefix + out_suffix
+    cmd = CommandLine('./DWIConvert --inputVolume %s --outputVolume %s.nrrd --conversionMode FSLToNrrd --inputBValues %s --inputBVectors %s' % (filename_nii, basename, filename_bval, filename_bvec))
     print "NII->NRRD:" + cmd.cmd
     cmd.run()
     return os.path.abspath('%s.nrrd' % (basename))
@@ -129,8 +222,8 @@ def dicom2nrrd(dicomdir, out_prefix, out_suffix):
             os.remove(dirnames[d_i])
     
     from nipype.interfaces.base import CommandLine
-    basename = experiment_dir + '/' + out_prefix + '/' + out_prefix + out_suffix
-    cmd = CommandLine('/Users/eija/Documents/osx/dcm2nii -a Y -d N -e N -i N -p N -o %s %s' % (basename,dicomdir))
+    basename = experiment_dir + os.sep + out_prefix + os.sep + out_prefix + out_suffix
+    cmd = CommandLine('./dcm2nii -a Y -d N -e N -i N -p N -o %s %s' % (basename,dicomdir))
     print "DICOM->NII:" + cmd.cmd
     cmd.run()
 
@@ -153,11 +246,11 @@ def dicom2nrrd(dicomdir, out_prefix, out_suffix):
                 raise "multiple copies of .bvec was found"
             filename_bvec = fileName
 
-    d2s.move_to_results((dicomdir + '/' + filename_nii + '.gz'), out_prefix)
-    d2s.move_to_results((dicomdir + '/' + filename_bval + '.bval'), out_prefix)
-    d2s.move_to_results((dicomdir + '/' + filename_bvec + '.bvec'), out_prefix)
+    move_to_results((dicomdir + os.sep + filename_nii + '.gz'), out_prefix)
+    move_to_results((dicomdir + os.sep + filename_bval + '.bval'), out_prefix)
+    move_to_results((dicomdir + os.sep + filename_bvec + '.bvec'), out_prefix)
 
-    cmd = CommandLine('DWIConvert --inputVolume %s.nii.gz --outputVolume %s.nrrd --conversionMode FSLToNrrd --inputBValues %s.bval --inputBVectors %s.bvec' % (basename, basename, basename, basename))
+    cmd = CommandLine('./DWIConvert --inputVolume %s.nii.gz --outputVolume %s.nrrd --conversionMode FSLToNrrd --inputBValues %s.bval --inputBVectors %s.bvec' % (basename, basename, basename, basename))
     print "NII->NRRD:" + cmd.cmd
     cmd.run()
     return os.path.abspath('%s.nrrd' % (basename))
@@ -169,15 +262,16 @@ def dicom2nrrd(dicomdir, out_prefix, out_suffix):
 # out_prefix - subject specific prefix
 #
 def nrrd2nii(in_file, output_prefix):
+    import os
     from os.path import abspath as opap
     from nipype.interfaces.base import CommandLine
     from nipype.utils.filemanip import split_filename
     _, name, _ = split_filename(in_file)
-    out_vol = experiment_dir + '/' + output_prefix + '/' + ('%s.nii.gz' % name)
-    out_bval = experiment_dir + '/' + output_prefix + '/' + ('%s.bval' % name)
-    out_bvec = experiment_dir + '/' + output_prefix + '/' + ('%s.bvec' % name)
+    out_vol = experiment_dir + os.sep + output_prefix + os.sep + ('%s.nii.gz' % name)
+    out_bval = experiment_dir + os.sep + output_prefix + os.sep + ('%s.bval' % name)
+    out_bvec = experiment_dir + os.sep + output_prefix + os.sep + ('%s.bvec' % name)
     
-    cmd = CommandLine(('DWIConvert --inputVolume %s --outputVolume %s --outputBValues %s'
+    cmd = CommandLine(('./DWIConvert --inputVolume %s --outputVolume %s --outputBValues %s'
                        ' --outputBVectors %s --conversionMode NrrdToFSL') % (in_file, out_vol,
                                                                              out_bval, out_bvec))
 
@@ -192,13 +286,14 @@ def nrrd2nii(in_file, output_prefix):
 # out_prefix - subject specific prefix
 #
 def nrrd2nii_pmap(in_file, output_prefix):
+    import os
     from os.path import abspath as opap
     from nipype.interfaces.base import CommandLine
     from nipype.utils.filemanip import split_filename
     _, name, _ = split_filename(in_file)
-    out_vol = experiment_dir + '/' + output_prefix + '/' + ('%s.nii.gz' % name)
+    out_vol = experiment_dir + os.sep + output_prefix + os.sep + ('%s.nii.gz' % name)
 
-    cmd = CommandLine(('DWIConvert --inputVolume %s --outputVolume %s'
+    cmd = CommandLine(('./DWIConvert --inputVolume %s --outputVolume %s'
                        ' --conversionMode NrrdToFSL') % (in_file, out_vol))
 
     print "NRRD->NIFTI:" + cmd.cmd

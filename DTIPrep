@@ -1,0 +1,4 @@
+#!/bin/bash
+scriptName=$0
+directory="${scriptName%/*}"
+${directory}/DTIPrepExec

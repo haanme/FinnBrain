@@ -3,7 +3,6 @@
 experiment_dir = '/Users/eija/Documents/FinnBrain/pipelinedata'
 DTIprep_protocol = '/Users/eija/Documents/FinnBrain/scripts/default.xml'
 
-
 #
 # Moves file to results folder, overwriting the existing file
 #
